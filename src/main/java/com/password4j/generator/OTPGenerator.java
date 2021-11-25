@@ -1,3 +1,20 @@
+/*
+ *  (C) Copyright 2020 Password4j (http://password4j.com/).
+ *
+ *  Licensed under the Apache License, Version 2.0 (the "License");
+ *  you may not use this file except in compliance with the License.
+ *  You may obtain a copy of the License at
+ *
+ *      http://www.apache.org/licenses/LICENSE-2.0
+ *
+ *  Unless required by applicable law or agreed to in writing, software
+ *  distributed under the License is distributed on an "AS IS" BASIS,
+ *  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ *  See the License for the specific language governing permissions and
+ *  limitations under the License.
+ *
+ */
+
 package com.password4j.generator;
 
 import java.security.InvalidKeyException;
@@ -7,18 +24,31 @@ import javax.crypto.Mac;
 import javax.crypto.ShortBufferException;
 import javax.crypto.spec.SecretKeySpec;
 
+import org.apache.commons.lang3.StringUtils;
+
 import com.password4j.types.Hmac;
 
 
-class OTPGenerator
+abstract class OTPGenerator
 {
+    private static final int[] DIGITS_POWER = {10, 100, 1_000, 10_000, 100_000, 1_000_000, 10_000_000, 100_000_000};
 
-    public static String generate(byte[] key, long counter, int length, Hmac algorithm)
+    protected int length;
+
+    protected Hmac hmac;
+
+    OTPGenerator(Hmac hmac, int length)
     {
-        Mac mac = getHmac(algorithm);
+        this.length = length;
+        this.hmac = hmac;
+    }
+
+
+    protected String generate(byte[] key, long counter)
+    {
+        Mac mac = getMac();
         try
         {
-
             byte[] buffer = getBuffer(counter, mac);
 
             SecretKeySpec secretKeySpec = new SecretKeySpec(key, "RAW");
@@ -34,7 +64,7 @@ class OTPGenerator
                     | ((buffer[offset + 2] & 0xff) << 8)
                     | (buffer[offset + 3] & 0xff);
 
-            int result = binary % getDiv(length);
+            int result = binary % DIGITS_POWER[length - 1];
 
             StringBuilder sb = new StringBuilder(Integer.toString(result));
             while (sb.length() < length)
@@ -42,17 +72,20 @@ class OTPGenerator
                 sb.insert(0, '0');
             }
             return sb.toString();
-
         }
         catch (InvalidKeyException e)
         {
-            throw new IllegalStateException("Cannot find definition for " + mac.getAlgorithm() + ".", e);
+            throw new IllegalStateException("Cannot use secret as key.", e);
         }
         catch (ShortBufferException e)
         {
             throw new IllegalArgumentException("Buffer is not aligned with " + mac.getAlgorithm() + "'s length.", e);
         }
+    }
 
+    public boolean check(String otp, byte[] secret, long counter)
+    {
+        return StringUtils.equals(otp, generate(secret, counter));
     }
 
     private static byte[] getBuffer(long counter, Mac mac)
@@ -69,34 +102,35 @@ class OTPGenerator
         return buffer;
     }
 
-    public static Mac getHmac(Hmac hmac)
+
+    Mac getMac()
     {
+        String algorithm = "Hmac" + hmac.name().toUpperCase();
         try
         {
-            return Mac.getInstance("Hmac" + hmac.name().toUpperCase());
+            return Mac.getInstance(algorithm);
         }
         catch (NoSuchAlgorithmException e)
         {
-            throw new IllegalStateException("Cannot find definition for HmacSHA1");
+            throw new IllegalStateException("Cannot find definition for " + algorithm);
         }
     }
 
-    private static int getDiv(int length)
+    static void checkLength(int length)
     {
-        if (length == 6)
+        if(length < 1 || length > DIGITS_POWER.length)
         {
-            return 1_000_000;
+            throw new IllegalArgumentException("Length must be between 1 and 8 inclusive. Got " + length + ".");
         }
-        else if( length == 7)
-        {
-            return 10_000_000;
-        }
-        else if (length == 8)
-        {
-            return 100_000_000;
-        }
-        else {
-           return 1_000_000;
-        }
+    }
+
+    public Hmac getHmac()
+    {
+        return hmac;
+    }
+
+    public int getLength()
+    {
+        return length;
     }
 }
